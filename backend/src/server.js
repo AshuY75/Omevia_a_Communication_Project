@@ -12,6 +12,12 @@ import adminMetrics from "./routes/adminMetrics.js";
 import "./jobs/dailyMetrics.js";
 import rateLimit from "express-rate-limit";
 
+// Load env FIRST
+dotenv.config();
+
+const app = express();
+
+/* -------------------- RATE LIMIT -------------------- */
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 20,
@@ -19,45 +25,48 @@ const authLimiter = rateLimit({
   legacyHeaders: false,
 });
 
-// Load env
-dotenv.config();
-
-const app = express();
-
-// ✅ CORS (ONCE, EARLY)
+/* -------------------- CORS -------------------- */
 app.use(
   cors({
-    origin: "http://localhost:5173",
+    origin: process.env.FRONTEND_URL, // ✅ PROD SAFE
     credentials: true,
   })
 );
 
-app.use(express.json());
-
-// Routes
-app.get("/", (req, res) => {
-  res.send("Omevia backend running");
-});
-app.use("/auth", authRoutes);
-app.use("/report", reportRoutes);
+/* -------------------- HEADERS (OAuth SAFE) -------------------- */
 app.use((req, res, next) => {
   res.setHeader("Cross-Origin-Opener-Policy", "same-origin-allow-popups");
   next();
 });
+
+app.use(express.json());
+
+/* -------------------- HEALTH CHECK (Railway) -------------------- */
+app.get("/health", (req, res) => {
+  res.status(200).send("OK");
+});
+
+/* -------------------- ROUTES -------------------- */
+app.get("/", (req, res) => {
+  res.send("Omevia backend running");
+});
+
+app.use("/auth", authLimiter, authRoutes);
+app.use("/report", reportRoutes);
 app.use("/skip", skipRoutes);
 app.use("/admin/metrics", adminMetrics);
 
-// MongoDB
+/* -------------------- DATABASE -------------------- */
 mongoose
   .connect(process.env.MONGO_URI)
   .then(() => console.log("✅ MongoDB connected"))
   .catch((err) => console.error("❌ Mongo error:", err));
 
-// HTTP + Socket
+/* -------------------- HTTP + SOCKET -------------------- */
 const server = http.createServer(app);
 initSocket(server);
 
-// Start server
+/* -------------------- START SERVER -------------------- */
 const PORT = process.env.PORT || 5000;
 server.listen(PORT, () => {
   console.log(`✅ Backend running on port ${PORT}`);
