@@ -11,6 +11,8 @@ function MatchPage({ user }) {
   const [sessionId, setSessionId] = useState(null);
   const [startedAt, setStartedAt] = useState(null);
   const [isTyping, setIsTyping] = useState(false);
+  const [isInitiator, setIsInitiator] = useState(false);
+  const [sessionState, setSessionState] = useState("connected");
 
   /* =========================
      SOCKET LIFECYCLE
@@ -25,15 +27,16 @@ function MatchPage({ user }) {
     });
 
     // Matched
-    socket.on("matched", ({ sessionId }) => {
+    socket.on("matched", ({ sessionId, isInitiator }) => {
       setSessionId(sessionId);
-      setStartedAt(Date.now());
+      setIsInitiator(isInitiator);
     });
 
     // Session ended
     socket.on("sessionEnded", () => {
       setSessionId(null);
       setStartedAt(null);
+      setSessionState("ended");
 
       socket.emit("joinQueue", {
         userId: user.googleId,
@@ -80,22 +83,18 @@ function MatchPage({ user }) {
       {/* MAIN CONTENT (VIDEO + CHAT) */}
       <div className="flex-1 flex flex-col md:flex-row overflow-hidden">
         {/* 🎥 VIDEO SECTION */}
-        <div
-          className="
-          w-full
-          md:w-1/2
-          h-[35vh]
-          md:h-full
-          flex-shrink-0
-          border-b md:border-b-0 md:border-r
-          border-zinc-800
-        "
-        >
-          <VideoChat sessionId={sessionId} isInitiator={true} />
+        <div className="w-full md:w-[60%] h-[40vh] md:h-full border-b md:border-b-0 md:border-r border-zinc-800">
+          {sessionState === "ended" && (
+            <div className="fixed inset-0 flex items-center justify-center bg-black text-zinc-400">
+              Stranger disconnected. Finding a new one…
+            </div>
+          )}
+
+          <VideoChat sessionId={sessionId} isInitiator={isInitiator} />
         </div>
 
         {/* 💬 CHAT SECTION */}
-        <div className="flex-1 flex flex-col overflow-hidden">
+        <div className="flex flex-col flex-1 max-w-[900px] w-full mx-auto px-4 py-4 overflow-hidden">
           <ChatBox sessionId={sessionId} />
 
           {/* Typing indicator */}

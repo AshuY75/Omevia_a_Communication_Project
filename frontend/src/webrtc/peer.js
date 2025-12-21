@@ -57,6 +57,10 @@ export async function createAnswer(offer) {
 }
 
 export async function setRemoteAnswer(answer) {
+  if (pc.signalingState !== "have-local-offer") {
+    console.warn("Skipping setRemoteAnswer, state:", pc.signalingState);
+    return;
+  }
   await pc.setRemoteDescription(answer);
 }
 

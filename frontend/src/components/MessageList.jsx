@@ -15,58 +15,25 @@ function MessageList({ messages }) {
       </div>
     );
   }
-  {
-    messages.map((msg, i) => {
-      if (msg.type === "system") {
-        return (
-          <div key={i} className="text-xs text-center text-zinc-500 py-2">
-            {msg.text}
-          </div>
-        );
-      }
-
-      const isMe = msg.sender === "me";
-
-      return (
-        <div
-          key={i}
-          className={`flex ${isMe ? "justify-end" : "justify-start"}`}
-        >
-          <div
-            className={`max-w-[70%] px-4 py-2 rounded-2xl text-sm break-words
-          ${
-            isMe
-              ? "bg-red-500 text-white rounded-br-none"
-              : "bg-zinc-800 text-white border border-zinc-700 rounded-bl-none"
-          }`}
-          >
-            <div>{msg.text}</div>
-            <div className="mt-1 text-[10px] opacity-60 text-right">
-              {new Date(msg.time).toLocaleTimeString([], {
-                hour: "2-digit",
-                minute: "2-digit",
-              })}
-              {isMe && (
-                <div className="text-[10px] text-right opacity-60">
-                  {msg.status === "delivered" ? "✓✓" : "✓"}
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      );
-    });
-  }
 
   return (
     <div className="flex flex-col gap-3">
       {messages.map((msg, i) => {
-        const isMe = msg.senderSocketId === socket.id;
+        // 🔹 SYSTEM MESSAGE
+        if (msg.type === "system") {
+          return (
+            <div key={i} className="text-xs text-center text-zinc-500 py-2">
+              {msg.text}
+            </div>
+          );
+        }
+
+        const isMe = msg.sender === "me" || msg.senderSocketId === socket.id;
 
         return (
           <div
             key={i}
-            className={`flex "animate-fadeIn" ${
+            className={`flex animate-fadeIn ${
               isMe ? "justify-end" : "justify-start"
             }`}
           >
@@ -78,18 +45,25 @@ function MessageList({ messages }) {
                     : "bg-zinc-800 text-white border border-zinc-700 rounded-bl-none"
                 }`}
             >
-              {msg.text}
+              {/* message text */}
+              <div>{msg.text}</div>
 
-              <div className="mt-1 text-[10px] opacity-70 text-right">
-                {new Date(msg.time).toLocaleTimeString([], {
-                  hour: "2-digit",
-                  minute: "2-digit",
-                })}
+              {/* time + delivery */}
+              <div className="mt-1 flex items-center justify-end gap-1 text-[10px] opacity-60">
+                <span>
+                  {new Date(msg.time).toLocaleTimeString([], {
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  })}
+                </span>
+
+                {isMe && <span>{msg.status === "delivered" ? "✓✓" : "✓"}</span>}
               </div>
             </div>
           </div>
         );
       })}
+
       <div ref={bottomRef} />
     </div>
   );

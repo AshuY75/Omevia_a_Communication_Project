@@ -165,8 +165,15 @@ function createSession(io, userA, userB) {
 
   activeSessions.set(sessionId, session);
 
-  io.to(userA.socketId).emit("matched", { sessionId });
-  io.to(userB.socketId).emit("matched", { sessionId });
+  io.to(userA.socketId).emit("matched", {
+    sessionId,
+    isInitiator: true,
+  });
+
+  io.to(userB.socketId).emit("matched", {
+    sessionId,
+    isInitiator: false,
+  });
 
   setTimeout(() => {
     finalizeSession(io, session, "natural");
