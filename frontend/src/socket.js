@@ -2,6 +2,7 @@ import { io } from "socket.io-client";
 
 const socket = io(import.meta.env.VITE_BACKEND_URL, {
   withCredentials: true,
+  transports: ["websocket", "polling"],
 });
 
 socket.on("connect", () => {
@@ -13,9 +14,13 @@ socket.on("pong_test", (msg) => {
   console.log("✅ BACKEND REPLIED:", msg);
 });
 
-socket.on("disconnect", () => {
-  console.log("❌ FRONTEND SOCKET DISCONNECTED");
+socket.on("connect_error", (err) => {
+  console.error("❌ SOCKET CONNECT ERROR:", err.message);
 });
-window.socket = socket;
 
+socket.on("disconnect", (reason) => {
+  console.log("❌ FRONTEND SOCKET DISCONNECTED:", reason);
+});
+
+window.socket = socket;
 export default socket;

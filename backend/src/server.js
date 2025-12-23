@@ -1,73 +1,68 @@
 import express from "express";
-import cors from "cors";
 import mongoose from "mongoose";
 import dotenv from "dotenv";
 import http from "http";
-import skipRoutes from "./routes/skipRoutes.js";
-import authRoutes from "./routes/authRoutes.js";
-import { initSocket } from "./socket/socket.js";
-import reportRoutes from "./routes/reportRoutes.js";
-import SafetyMetric from "./models/SafetyMetric.js";
-import adminMetrics from "./routes/adminMetrics.js";
-import "./jobs/dailyMetrics.js";
-import rateLimit from "express-rate-limit";
+import path from "path";
+import { fileURLToPath } from "url";
 
-// Load env FIRST
-dotenv.config();
+import authRoutes from "./routes/authRoutes.js";
+import skipRoutes from "./routes/skipRoutes.js";
+import reportRoutes from "./routes/reportRoutes.js";
+import adminMetrics from "./routes/adminMetrics.js";
+import { initSocket } from "./socket/socket.js";
+
+dotenv.config({
+  path: path.resolve(process.cwd(), ".env"),
+});
+console.log("ENV CHECK:", process.env.GOOGLE_CLIENT_ID);
 
 const app = express();
 
-/* -------------------- RATE LIMIT -------------------- */
-const authLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 20,
-  standardHeaders: true,
-  legacyHeaders: false,
-});
+/* -------------------- FIX __dirname -------------------- */
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
-/* -------------------- CORS -------------------- */
-app.use(
-  cors({
-    origin: process.env.FRONTEND_URL, // ✅ PROD SAFE
-    credentials: true,
-  })
-);
+/* -------------------- TRUST PROXY (RENDER) -------------------- */
+// Required for Render / reverse proxies
+app.set("trust proxy", 1);
 
-/* -------------------- HEADERS (OAuth SAFE) -------------------- */
+/* -------------------- BODY PARSER -------------------- */
+app.use(express.json());
+
+/* -------------------- OAUTH SAFE HEADER -------------------- */
 app.use((req, res, next) => {
   res.setHeader("Cross-Origin-Opener-Policy", "same-origin-allow-popups");
   next();
 });
 
-app.use(express.json());
-
-/* -------------------- HEALTH CHECK (Railway) -------------------- */
-app.get("/health", (req, res) => {
-  res.status(200).send("OK");
-});
-
-/* -------------------- ROUTES -------------------- */
-app.get("/", (req, res) => {
-  res.send("Omevia backend running");
-});
-
-app.use("/auth", authLimiter, authRoutes);
+/* -------------------- API ROUTES (BEFORE STATIC) -------------------- */
+app.use("/auth", authRoutes);
 app.use("/report", reportRoutes);
 app.use("/skip", skipRoutes);
 app.use("/admin/metrics", adminMetrics);
+
+/* -------------------- SERVE FRONTEND -------------------- */
+app.use(express.static(path.join(__dirname, "dist")));
+
+app.get("*", (req, res) => {
+  res.sendFile(path.join(__dirname, "dist", "index.html"));
+});
 
 /* -------------------- DATABASE -------------------- */
 mongoose
   .connect(process.env.MONGO_URI)
   .then(() => console.log("✅ MongoDB connected"))
-  .catch((err) => console.error("❌ Mongo error:", err));
+  .catch((err) => {
+    console.error("❌ MongoDB error:", err);
+    process.exit(1);
+  });
 
-/* -------------------- HTTP + SOCKET -------------------- */
+/* -------------------- SERVER + SOCKET -------------------- */
 const server = http.createServer(app);
 initSocket(server);
+console.log("GOOGLE_CLIENT_ID:", process.env.GOOGLE_CLIENT_ID);
 
-/* -------------------- START SERVER -------------------- */
-const PORT = process.env.PORT || 5000;
+const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
-  console.log(`✅ Backend running on port ${PORT}`);
+  console.log(`✅ Server running on port ${PORT}`);
 });

@@ -3,32 +3,28 @@ import { handleMatchmaking } from "./matchmaker.js";
 import { handleReport } from "../services/reportService.js";
 
 export function initSocket(server) {
+  // 🔥 SAME-ORIGIN SOCKET (NO CORS)
   const io = new Server(server, {
-    cors: {
-      origin: "http://localhost:5173",
-      methods: ["GET", "POST"],
-      credentials: true,
-    },
+    path: "/socket.io",
+    serveClient: false,
   });
 
   io.on("connection", (socket) => {
     console.log("✅ SOCKET CONNECTED:", socket.id);
 
-    // Optional: attach identity (future hardening)
-    socket.userId = socket.handshake.auth?.googleId || null;
+    // Optional identity (provided by client after auth)
+    socket.userId = socket.handshake.auth?.googleId ?? null;
 
-    // Verification event
     socket.on("ping_test", () => {
-      console.log("📩 Ping from frontend:", socket.id);
       socket.emit("pong_test", "pong from backend");
     });
 
-    // Matchmaking
+    // Matchmaking logic
     handleMatchmaking(io, socket);
 
-    // Report (NO HTTP LOOP)
+    // Report user (auth required)
     socket.on("reportUser", async ({ reportedId }) => {
-      if (!socket.userId) return;
+      if (!socket.userId || !reportedId) return;
 
       try {
         await handleReport({
@@ -36,7 +32,7 @@ export function initSocket(server) {
           reportedId,
         });
       } catch (err) {
-        console.error("Report failed:", err);
+        console.error("❌ Report failed:", err.message);
       }
     });
 

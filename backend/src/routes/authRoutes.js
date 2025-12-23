@@ -4,47 +4,54 @@ import User from "../models/UserModel.js";
 
 const router = express.Router();
 
+/* -------------------- VALIDATE ENV -------------------- */
+if (process.env.GOOGLE_CLIENT_ID) {
+  throw new Error("❌ GOOGLE_CLIENT_ID is not set");
+}
+
 const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
-// Google OAuth route
+/* -------------------- GOOGLE AUTH -------------------- */
 router.post("/google", async (req, res) => {
-  const { token } = req.body;
-
-  if (!token) {
-    return res.status(400).json({ error: "Token missing" });
-  }
-
   try {
+    const { token } = req.body;
+
+    if (!token) {
+      return res.status(400).json({ error: "Token missing" });
+    }
+
     const ticket = await client.verifyIdToken({
       idToken: token,
       audience: process.env.GOOGLE_CLIENT_ID,
     });
 
     const payload = ticket.getPayload();
-    const googleId = payload.sub;
 
-    let user = await User.findOne({ googleId });
+    // 🔐 Hard gate: Google-verified email only
+    if (!payload?.email_verified) {
+      return res.status(403).json({ error: "Email not verified" });
+    }
+
+    let user = await User.findOne({ googleId: payload.sub });
 
     if (!user) {
-      user = await User.create({ googleId });
+      user = await User.create({
+        googleId: payload.sub,
+        email: payload.email,
+        trustScore: 100, // default (frontend expects this)
+      });
     }
 
-    if (user.isBanned) {
-      return res.status(403).json({ error: "User banned" });
-    }
-    console.log("Backend CLIENT ID:", process.env.GOOGLE_CLIENT_ID);
-
-    // ✅ SEND RESPONSE ONCE
-    return res.json({
-      success: true,
-      trustScore: user.trustScore,
+    // ✅ Single, consistent response shape
+    return res.status(200).json({
       googleId: user.googleId,
+      email: user.email,
+      trustScore: user.trustScore,
     });
   } catch (err) {
-    console.error("Google auth error:", err);
-    return res.status(401).json({ error: "Invalid token" });
+    console.error("❌ Google auth error:", err.message);
+    return res.status(401).json({ error: "Invalid Google token" });
   }
-  console.log("Backend CLIENT ID:", process.env.GOOGLE_CLIENT_ID);
 });
 
 export default router;
