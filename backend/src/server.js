@@ -10,6 +10,8 @@ import skipRoutes from "./routes/skipRoutes.js";
 import reportRoutes from "./routes/reportRoutes.js";
 import adminMetrics from "./routes/adminMetrics.js";
 import { initSocket } from "./socket/socket.js";
+const waitingQueue = new Map(); // socket.id -> socket
+const activeSessions = new Map(); // sessionId -> { a, b }
 
 dotenv.config({
   path: path.resolve(process.cwd(), ".env"),

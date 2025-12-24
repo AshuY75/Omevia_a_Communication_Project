@@ -3,35 +3,33 @@ import User from "../models/UserModel.js";
 import Session from "../models/SessionModel.js";
 import { calculateSessionScore } from "../utils/sessionScore.js";
 
-const normalQueue = [];
-const isolatedQueue = [];
-const activeSessions = new Map();
-const FORCE_MATCH = true; // 🔥 EARLY STAGE MODE
+// 🔥 SAFE DATA STRUCTURES
+const waitingQueue = new Map(); // socketId -> { userId }
+const activeSessions = new Map(); // sessionId -> session
+const socketToSession = new Map(); // socketId -> sessionId
 
 export function handleMatchmaking(io, socket) {
   /* ==========================
      JOIN QUEUE
   ========================== */
-
-  socket.on("joinQueue", ({ userId, trustScore }) => {
+  socket.on("joinQueue", ({ userId }) => {
+    console.log("🟢 joinQueue:", socket.id, userId);
     if (!userId) return;
 
-    // 🔥 FORCE MATCH: everyone goes to ONE queue
-    if (FORCE_MATCH) {
-      if (normalQueue.find((u) => u.userId === userId)) return;
+    // Clean any stale state
+    cleanupSocket(io, socket.id);
 
-      normalQueue.push({ userId, socketId: socket.id });
-      attemptMatch(io);
-      return;
-    }
-
-    // 🚫 future (disabled for now)
-    const queue = trustScore > 50 ? normalQueue : isolatedQueue;
-
-    if (queue.find((u) => u.userId === userId)) return;
-    queue.push({ userId, socketId: socket.id });
+    // Add to queue
+    waitingQueue.set(socket.id, { userId });
 
     attemptMatch(io);
+  });
+
+  /* ==========================
+     DISCONNECT
+  ========================== */
+  socket.on("disconnect", () => {
+    cleanupSocket(io, socket.id);
   });
 
   /* ==========================
@@ -41,88 +39,32 @@ export function handleMatchmaking(io, socket) {
     const session = activeSessions.get(sessionId);
     if (!session) return;
 
-    const receiverSocketId =
+    const other =
       socket.id === session.userA.socketId
         ? session.userB.socketId
         : session.userA.socketId;
 
-    const payload = {
-      text: message.text ?? message, // safe
+    io.to(other).emit("receiveMessage", {
+      text: message.text ?? message,
       senderSocketId: socket.id,
       time: Date.now(),
-    };
-
-    // send to OTHER user
-    io.to(receiverSocketId).emit("receiveMessage", payload);
-
-    // send back to SENDER (echo)
-    socket.emit("receiveMessage", payload);
+    });
   });
 
   /* ==========================
-     TYPING INDICATOR ✅ (FIXED PLACE)
+     TYPING
   ========================== */
   socket.on("typing", ({ sessionId }) => {
-    const session = activeSessions.get(sessionId);
-    if (!session) return;
-
-    const otherSocket =
-      socket.id === session.userA.socketId
-        ? session.userB.socketId
-        : session.userA.socketId;
-
-    io.to(otherSocket).emit("userTyping");
+    relayToOther(io, socket.id, sessionId, "userTyping");
   });
 
-  socket.on("typingStop", ({ sessionId }) => {
-    const session = activeSessions.get(sessionId);
-    if (!session) return;
-
-    const otherSocket =
-      socket.id === session.userA.socketId
-        ? session.userB.socketId
-        : session.userA.socketId;
-
-    io.to(otherSocket).emit("userTyping");
-  });
   /* ==========================
-     VIDEO/Audio
+     WEBRTC SIGNALS
   ========================== */
-
-  socket.on("webrtc-offer", ({ sessionId, offer }) => {
-    const session = activeSessions.get(sessionId);
-    if (!session) return;
-
-    const other =
-      socket.id === session.userA.socketId
-        ? session.userB.socketId
-        : session.userA.socketId;
-
-    io.to(other).emit("webrtc-offer", { offer });
-  });
-
-  socket.on("webrtc-answer", ({ sessionId, answer }) => {
-    const session = activeSessions.get(sessionId);
-    if (!session) return;
-
-    const other =
-      socket.id === session.userA.socketId
-        ? session.userB.socketId
-        : session.userA.socketId;
-
-    io.to(other).emit("webrtc-answer", { answer });
-  });
-
-  socket.on("webrtc-ice", ({ sessionId, candidate }) => {
-    const session = activeSessions.get(sessionId);
-    if (!session) return;
-
-    const other =
-      socket.id === session.userA.socketId
-        ? session.userB.socketId
-        : session.userA.socketId;
-
-    io.to(other).emit("webrtc-ice", { candidate });
+  ["webrtc-offer", "webrtc-answer", "webrtc-ice"].forEach((event) => {
+    socket.on(event, (payload) => {
+      relayToOther(io, socket.id, payload.sessionId, event, payload);
+    });
   });
 
   /* ==========================
@@ -137,47 +79,70 @@ export function handleMatchmaking(io, socket) {
 }
 
 /* ==========================
-   MATCH TWO USERS
+   MATCH USERS
 ========================== */
 function attemptMatch(io) {
-  if (normalQueue.length < 2) return;
+  const ids = [...waitingQueue.keys()];
+  if (ids.length < 2) return;
 
-  const userA = normalQueue.shift();
-  const userB = normalQueue.shift();
+  const a = ids[0];
+  const b = ids[1];
 
-  createSession(io, userA, userB);
+  const userA = waitingQueue.get(a);
+  const userB = waitingQueue.get(b);
+
+  if (!userA || !userB) return;
+
+  waitingQueue.delete(a);
+  waitingQueue.delete(b);
+
+  createSession(io, a, userA.userId, b, userB.userId);
 }
 
 /* ==========================
    CREATE SESSION
 ========================== */
-function createSession(io, userA, userB) {
+function createSession(io, socketA, userAId, socketB, userBId) {
   const sessionId = crypto.randomUUID();
-  const duration = Math.floor(Math.random() * (20 - 10 + 1) + 10) * 60 * 1000;
 
   const session = {
     sessionId,
-    userA,
-    userB,
+    userA: { socketId: socketA, userId: userAId },
+    userB: { socketId: socketB, userId: userBId },
     startedAt: Date.now(),
-    expiresAt: Date.now() + duration,
   };
 
   activeSessions.set(sessionId, session);
+  socketToSession.set(socketA, sessionId);
+  socketToSession.set(socketB, sessionId);
 
-  io.to(userA.socketId).emit("matched", {
-    sessionId,
-    isInitiator: true,
-  });
+  io.to(socketA).emit("matched", { sessionId, isInitiator: true });
+  io.to(socketB).emit("matched", { sessionId, isInitiator: false });
+}
 
-  io.to(userB.socketId).emit("matched", {
-    sessionId,
-    isInitiator: false,
-  });
+/* ==========================
+   CLEANUP SOCKET (NO REQUEUE)
+========================== */
+function cleanupSocket(io, socketId) {
+  waitingQueue.delete(socketId);
 
-  setTimeout(() => {
-    finalizeSession(io, session, "natural");
-  }, duration);
+  const sessionId = socketToSession.get(socketId);
+  if (!sessionId) return;
+
+  const session = activeSessions.get(sessionId);
+  if (!session) return;
+
+  const other =
+    session.userA.socketId === socketId
+      ? session.userB.socketId
+      : session.userA.socketId;
+
+  socketToSession.delete(socketId);
+  socketToSession.delete(other);
+  activeSessions.delete(sessionId);
+
+  // 🔥 ONLY notify survivor
+  io.to(other).emit("sessionEnded");
 }
 
 /* ==========================
@@ -186,12 +151,15 @@ function createSession(io, userA, userB) {
 async function finalizeSession(io, session, endedBy, actorId = null) {
   if (!activeSessions.has(session.sessionId)) return;
 
-  const durationSeconds = Math.floor((Date.now() - session.startedAt) / 1000);
-
   activeSessions.delete(session.sessionId);
 
   io.to(session.userA.socketId).emit("sessionEnded");
   io.to(session.userB.socketId).emit("sessionEnded");
+
+  socketToSession.delete(session.userA.socketId);
+  socketToSession.delete(session.userB.socketId);
+
+  const durationSeconds = Math.floor((Date.now() - session.startedAt) / 1000);
 
   await Session.create({
     sessionId: session.sessionId,
@@ -199,17 +167,14 @@ async function finalizeSession(io, session, endedBy, actorId = null) {
     userB: session.userB.userId,
     durationSeconds,
     endedBy,
-    reportedUser: null,
   });
 
   for (const user of [session.userA, session.userB]) {
-    const isSkipper = endedBy === "skip" && user.userId === actorId;
-
     const delta = calculateSessionScore({
       durationSeconds,
       endedBy,
       isReported: false,
-      isSkipper,
+      isSkipper: user.userId === actorId,
     });
 
     await User.updateOne(
@@ -217,4 +182,19 @@ async function finalizeSession(io, session, endedBy, actorId = null) {
       { $inc: { trustScore: delta } }
     );
   }
+}
+
+/* ==========================
+   UTILS
+========================== */
+function relayToOther(io, senderSocket, sessionId, event, payload = {}) {
+  const session = activeSessions.get(sessionId);
+  if (!session) return;
+
+  const other =
+    senderSocket === session.userA.socketId
+      ? session.userB.socketId
+      : session.userA.socketId;
+
+  io.to(other).emit(event, payload);
 }

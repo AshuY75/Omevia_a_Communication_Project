@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import socket from "./socket"; // IMPORT, don't auto-run
+
 import AgeGate from "./pages/AgeGate";
 import Auth from "./pages/Auth";
 import MatchPage from "./pages/MatchPage";
-import "./socket"; // socket init
 
 function App() {
   const [step, setStep] = useState("age");
@@ -10,12 +11,9 @@ function App() {
 
   const handleGoogle = async (token) => {
     try {
-      // 🔥 SAME-ORIGIN REQUEST (NO CORS)
       const res = await fetch("/auth/google", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ token }),
       });
 
@@ -26,23 +24,34 @@ function App() {
       const data = await res.json();
       console.log("✅ Verified user:", data);
 
-      // ✅ Minimal safety check
       if (!data.googleId) {
         throw new Error("Invalid auth response");
       }
 
-      // ✅ Save user
       setUser({
         googleId: data.googleId,
         trustScore: data.trustScore,
       });
 
-      // ✅ Move to next step
       setStep("match");
     } catch (err) {
       console.error("❌ Google auth error:", err.message);
     }
+    console.log("🟣 frontend socket id (before connect):", socket.id);
   };
+
+  // 🔥 SOCKET LIFECYCLE — SINGLE SOURCE OF TRUTH
+  useEffect(() => {
+    if (!user) return;
+
+    socket.auth = { googleId: user.googleId };
+
+    if (!socket.connected) {
+      socket.connect();
+    }
+
+    // ❌ DO NOT auto-disconnect here
+  }, [user]);
 
   return (
     <>
