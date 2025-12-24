@@ -5,9 +5,7 @@ import User from "../models/UserModel.js";
 const router = express.Router();
 
 /* -------------------- VALIDATE ENV -------------------- */
-if (process.env.GOOGLE_CLIENT_ID) {
-  throw new Error("❌ GOOGLE_CLIENT_ID is not set");
-}
+
 
 const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
